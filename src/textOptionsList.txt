@@ -1,0 +1,14 @@
+%localdisplayname% : Local player's display name
+%localname% : Local player's name
+%worldname% : Local player's world name
+%localmotd% : Local server M.O.T.D.
+%localversion% : Local server version
+%localservername% : Local server name
+%localmaxplayer% : Local max player counts
+%localplayerscounts% : Local player counts
+%lping% : Local player's ping
+%lcping% : Local player's ping with color
+%x%, %y%, %z% : Player's location
+%px%, %py%, %pz% : Accurate player's location
+%tps% : Server TPS
+%ldate% : Local machine date
