@@ -22,7 +22,8 @@ import java.util.function.Function;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
-import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.command.CommandSender;
+import org.bukkit.command.PluginCommand;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.plugin.messaging.PluginMessageListener;
@@ -30,6 +31,10 @@ import org.bukkit.plugin.messaging.PluginMessageListener;
 import com.google.common.io.ByteArrayDataOutput;
 import com.google.common.io.ByteStreams;
 import com.google.gson.GsonBuilder;
+
+import net.md_5.bungee.api.chat.BaseComponent;
+import net.md_5.bungee.api.chat.TranslatableComponent;
+import net.md_5.bungee.chat.ComponentSerializer;
 
 public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener {
 	/**
@@ -72,6 +77,31 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		return object.getClass().getField(name).get(object);
 	}
 
+	/**
+	 * @return if CustomTab asked by a Bungee proxy or not for local information
+	 */
+	public static boolean isBungeecord() {
+		return bungeecord;
+	}
+
+	/**
+	 * get the raw local text footer
+	 * 
+	 * @return raw footer
+	 */
+	public static String getLocalFooter() {
+		return footer;
+	}
+
+	/**
+	 * get the raw local text header
+	 * 
+	 * @return raw header
+	 */
+	public static String getLocalHeader() {
+		return header;
+	}
+
 	private static Object getMethod(String name, Object object) throws Exception {
 		return getMethod(name, object, new Class<?>[] {}, new Object[] {});
 	}
@@ -81,7 +111,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		return object.getClass().getMethod(name, parameterTypes).invoke(object, parameters);
 	}
 
-	private static Class<?> getNSMClass(String name) {
+	private static Class<?> getNMSClass(String name) {
 		try {
 			return Class.forName("net.minecraft.server."
 					+ Bukkit.getServer().getClass().getPackage().getName().split("\\.")[3] + "." + name);
@@ -91,9 +121,18 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		}
 	}
 
-	public static String getOptionnedText(String raw, Player p) {
+	/**
+	 * Replace in a raw text the Bungee text options
+	 * 
+	 * @param raw
+	 *            raw text data
+	 * @param player
+	 *            player to base information
+	 * @return the text with options
+	 */
+	public static String getOptionnedText(String raw, Player player) {
 		for (String key : textOptions.keySet())
-			raw = raw.replaceAll("%" + key + "%", textOptions.get(key).apply(p));
+			raw = raw.replaceAll("%" + key + "%", textOptions.get(key).apply(player));
 		return raw;
 	}
 
@@ -105,6 +144,10 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 			e.printStackTrace();
 			return null;
 		}
+	}
+
+	Map<String, Function<Player, String>> getTextOptions() {
+		return textOptions;
 	}
 
 	private static String loadFile(File file) throws IOException {
@@ -120,12 +163,17 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 
 	/**
 	 * Register a new text option for this plugin
-	 * @param name name of the option to add
-	 * @param option text option associated with the specified name
-	 * @throws IllegalArgumentException if the name does contain a non-alphanumerics characters
+	 * 
+	 * @param name
+	 *            name of the option to add
+	 * @param option
+	 *            text option associated with the specified name
+	 * @throws IllegalArgumentException
+	 *             if the name does contain a non-alphanumerics characters
 	 */
 	public static void registerTextOption(String name, Function<Player, String> option) {
-		if(!name.matches("[A-Za-z0-9\\_]*")) throw new IllegalArgumentException("name can only contain alphanumerics characters");
+		if (!name.matches("[A-Za-z0-9\\_]*"))
+			throw new IllegalArgumentException("name can only contain alphanumerics characters");
 		textOptions.put(name, option);
 	}
 
@@ -141,13 +189,13 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 	 */
 	public static void sendTab(Player player, String footer, String header) {
 		try {
-			Object packet = getNSMClass("PacketPlayOutPlayerListHeaderFooter").newInstance();
+			Object packet = getNMSClass("PacketPlayOutPlayerListHeaderFooter").newInstance();
 			setField("a", packet, new ChatComponentBuilder(header).buildChatBaseComponent());
 			setField("b", packet, new ChatComponentBuilder(footer).buildChatBaseComponent());
 			getMethod("sendPacket",
 					getField("playerConnection",
 							getMethod("getHandle", (getCraftBukkitClass("entity.CraftPlayer").cast(player)))),
-					new Class<?>[] { getNSMClass("Packet") }, new Object[] { packet });
+					new Class<?>[] { getNMSClass("Packet") }, new Object[] { packet });
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -155,6 +203,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 
 	/**
 	 * Send tab information to a proxy/player
+	 * 
 	 * @param plugin
 	 *            the plugin who send the tab information
 	 * @param player
@@ -163,7 +212,9 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 	 *            global header text
 	 * @param globalHeader
 	 *            global footer text
-	 * @throws IllegalArgumentException if the channel {@link CustomTabPlugin#CHANNEL_NAME} isn't registered for the plugin
+	 * @throws IllegalArgumentException
+	 *             if the channel {@link CustomTabPlugin#CHANNEL_NAME} isn't
+	 *             registered for the plugin
 	 * @see {@link CustomTabPlugin#sendTab(Player, String, String)} to send a tab
 	 */
 	public static void sendTabInformation(JavaPlugin plugin, Player player, String footer, String header) {
@@ -182,6 +233,23 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		f.setAccessible(true);
 		f.set(object, value);
 	}
+
+	private static File setFile(File file, String value) throws IOException {
+		BufferedWriter bw = new BufferedWriter(
+				new OutputStreamWriter(new FileOutputStream(file), Charset.forName("UTF-8")));
+		bw.write(value);
+		bw.close();
+		return file;
+	}
+
+	void setFooter(String footer) {
+		CustomTabPlugin.footer = footer;
+	}
+
+	void setHeader(String header) {
+		CustomTabPlugin.header = header;
+	}
+
 	private static String significantNumbers(double d, int n) {
 		String s = String.format("%." + n + "G", d);
 		if (s.contains("E+")) {
@@ -190,9 +258,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		return s;
 	}
 
-	private FileConfiguration config = getConfig();
-
-	private void loadConfigs() throws IOException {
+	void loadConfigs() throws IOException {
 		File d = createDir("plugins/" + getName());
 		File header = createFile(new File(d, "header.cfg"), "");
 		File footer = createFile(new File(d, "footer.cfg"), "");
@@ -201,22 +267,22 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 			CustomTabPlugin.header = loadFile(header);
 		} else
 			throw new FileNotFoundException();
-		bungeecord = config.getBoolean("bungeecord");
-		savePluginConfig();
+		bungeecord = getConfig().getBoolean("bungeecord");
+		getConfig().options().copyDefaults(false);
+		saveConfig();
 	}
 
 	@Override
 	public void onDisable() {
 		if (!bungeecord)
 			getServer().getScheduler().cancelTasks(this);
-		savePluginConfig();
 		super.onDisable();
 	}
 
 	@Override
 	public void onEnable() {
-		config.addDefault("bungeecord", bungeecord);
-		this.saveDefaultConfig();
+		getConfig().options().copyDefaults(false);
+		saveConfig();
 		try {
 			loadConfigs();
 		} catch (IOException e) {
@@ -250,7 +316,8 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 			try {
 				ping = (int) getField("ping",
 						getMethod("getHandle", getCraftBukkitClass("entity.CraftPlayer").cast(p)));
-			} catch (Exception e) {}
+			} catch (Exception e) {
+			}
 			return (ping < 0 ? ChatColor.WHITE
 					: (ping < 150 ? ChatColor.DARK_GREEN
 							: (ping < 300 ? ChatColor.GREEN
@@ -260,7 +327,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		});
 		textOptions.put("tps", p -> {
 			try {
-				Object server = getNSMClass("MinecraftServer").getMethod("getServer").invoke(null);
+				Object server = getNMSClass("MinecraftServer").getMethod("getServer").invoke(null);
 				double tps = ((double[]) server.getClass().getField("recentTps").get(server))[0];
 				return tps > 20.0D ? "*20.0" : significantNumbers(tps, 3);
 			} catch (Exception e) {
@@ -269,8 +336,8 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		});
 		textOptions.put("ldate", p -> new SimpleDateFormat("HH:mm:ss").format(Calendar.getInstance().getTime()));
 		if (bungeecord) {
-			this.getServer().getMessenger().registerOutgoingPluginChannel(this, CHANNEL_NAME);
-			this.getServer().getMessenger().registerIncomingPluginChannel(this, CHANNEL_NAME, this);
+			getServer().getMessenger().registerOutgoingPluginChannel(this, CHANNEL_NAME);
+			getServer().getMessenger().registerIncomingPluginChannel(this, CHANNEL_NAME, this);
 		} else {
 			getServer().getScheduler()
 					.runTaskTimer(this,
@@ -279,6 +346,10 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 									getOptionnedText(CustomTabPlugin.header.replace('&', ChatColor.COLOR_CHAR), p))),
 							0, 20);
 		}
+		PluginCommand pc = getServer().getPluginCommand("ltab");
+		CustomTabCommand command = new CustomTabCommand(this);
+		pc.setExecutor(command);
+		pc.setTabCompleter(command);
 		super.onEnable();
 	}
 
@@ -290,17 +361,40 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 				@SuppressWarnings("unchecked")
 				Map<String, Object> hm = new GsonBuilder().create().fromJson(dis.readUTF(), HashMap.class);
 				Player p = Bukkit.getPlayer(hm.containsKey("player") ? String.valueOf(hm.get("player")) : "");
-				sendTabInformation(this, p, 
-						getOptionnedText((hm.containsKey("footer") ? String.valueOf(hm.get("footer")) : "").replaceAll("%bukkitfootermessage%", footer), player),
-						getOptionnedText((hm.containsKey("header") ? String.valueOf(hm.get("header")) : "").replaceAll("%bukkitheadermessage%", header), player));
+				sendTabInformation(this, p,
+						getOptionnedText((hm.containsKey("footer") ? String.valueOf(hm.get("footer")) : "")
+								.replaceAll("%bukkitfootermessage%", footer), player),
+						getOptionnedText((hm.containsKey("header") ? String.valueOf(hm.get("header")) : "")
+								.replaceAll("%bukkitheadermessage%", header), player));
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
 		}
 	}
 
-	public void savePluginConfig() {
-		config.set("bungeecord", bungeecord);
+	void savePluginConfig() throws IOException {
+		File d = createDir("plugins/" + getName());
+		setFile(new File(d, "header.cfg"), footer);
+		setFile(new File(d, "footer.cfg"), header);
+
+		getConfig().set("bungeecord", bungeecord);
 		saveConfig();
 	}
+	static void sendText(CommandSender sender, BaseComponent... components) {
+		if (sender instanceof Player) {
+			try {
+				getMethod("sendMessage", getMethod("getHandle", getCraftBukkitClass("entity.CraftPlayer").cast(sender)),
+						new Class<?>[] { getNMSClass("IChatBaseComponent") },
+						new Object[] { getNMSClass("IChatBaseComponent").getDeclaredClasses()[0]
+								.getMethod("a", String.class).invoke(null, ComponentSerializer.toString(components)) });
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		} else if (getCraftBukkitClass("command.ColouredConsoleSender").isInstance(sender)) {
+			sender.sendMessage(TranslatableComponent.toLegacyText(components));
+		} else {
+			sender.sendMessage(TranslatableComponent.toPlainText(components));
+		}
+	}
+
 }

@@ -12,3 +12,12 @@
 %px%, %py%, %pz% : Accurate player's location
 %tps% : Server TPS
 %ldate% : Local machine date
+
+Permissions:
+ctp.ltab : use /ltab command
+ctp.ltab.reload : Reload config
+ctp.ltab.opt : Show available text options
+ctp.ltab.show : Show tab part
+ctp.ltab.delline : Delete a line
+ctp.ltab.addline : Add a line
+ctp.ltab.setline : Set a line
