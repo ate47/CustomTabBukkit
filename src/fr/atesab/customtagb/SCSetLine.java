@@ -56,7 +56,7 @@ public class SCSetLine extends SubCommand {
 	@Override
 	public List<String> onTabComplete(CommandSender sender, String[] args, CommandType type) {
 		List<String> list = new ArrayList<>();
-		plugin.getTextOptions().keySet().forEach(k -> list.add("%" + k + "%"));
+		plugin.getTextOptions().stream().filter(om -> om.canBeTabbed()).forEach(om -> om.getUsage());
 		return list;
 	}
 
