@@ -1,8 +1,5 @@
 package fr.atesab.customtagb;
 
-import java.util.ArrayList;
-import java.util.List;
-
 import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 
@@ -29,7 +26,8 @@ public class SCOpt extends SubCommand {
 		int page = 0;
 		if (args.length == 1
 				&& !(args[0].matches("[0-9]+") && (page = Integer.valueOf(args[0]) - 1) >= 0 && page < maxPage)) {
-			CustomTabPlugin.sendText(sender, new ComponentBuilder("This is not a valid page").color(ChatColor.RED).create());
+			CustomTabPlugin.sendText(sender,
+					new ComponentBuilder("This is not a valid page").color(ChatColor.RED).create());
 			return true;
 		}
 		ComponentBuilder title = new ComponentBuilder("Options").bold(true).color(ChatColor.RED);
@@ -38,14 +36,15 @@ public class SCOpt extends SubCommand {
 					.append("/").color(ChatColor.DARK_GRAY).append(String.valueOf(maxPage)).color(ChatColor.AQUA)
 					.append(")").color(ChatColor.DARK_GRAY);
 		CustomTabPlugin.sendText(sender, title.append(": ").bold(true).color(ChatColor.RED).create());
-		List<String> keys = new ArrayList<>(plugin.getTextOptions().keySet());
-		for (int i = page * elementByPage; i < keys.size() && i < (page + 1) * elementByPage; i++) {
-			String k = keys.get(i);
-			ComponentBuilder msg = new ComponentBuilder("- ").color(ChatColor.GRAY).append("%" + k + "%")
+		for (int i = page * elementByPage; i < plugin.getTextOptions().size() && i < (page + 1) * elementByPage; i++) {
+			OptionMatcher optionMatcher = plugin.getTextOptions().get(i);
+			ComponentBuilder msg = new ComponentBuilder("- ").color(ChatColor.GRAY).append("%" + optionMatcher + "%")
 					.color(ChatColor.GOLD);
-			if (sender instanceof Player)
-				msg.append(": ").color(ChatColor.GRAY)
-						.append(plugin.getTextOptions().get(k).apply(((Player) sender))).color(ChatColor.WHITE);
+			if (sender instanceof Player && optionMatcher.getExampleFunction() != null) {
+				String result = optionMatcher.getExampleFunction().apply((Player) sender, optionMatcher);
+				if (!result.isEmpty())
+					msg.append(": ").color(ChatColor.GRAY).append(result).color(ChatColor.WHITE);
+			}
 			CustomTabPlugin.sendText(sender, msg.create());
 		}
 		if (sender instanceof Player && maxPage != 1) {

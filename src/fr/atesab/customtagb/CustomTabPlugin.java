@@ -14,11 +14,16 @@ import java.io.OutputStreamWriter;
 import java.lang.reflect.Field;
 import java.nio.charset.Charset;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -39,16 +44,27 @@ import net.md_5.bungee.chat.ComponentSerializer;
 public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener {
 	/**
 	 * Channel used by CustomTab to send/receive Bungee tab
+	 * 
+	 * @since 1.1
 	 */
 	public static final String CHANNEL_NAME = "CustomTab";
 	/**
 	 * Rate between every tab change in tick (1/20s)
+	 * 
+	 * @since 1.1
 	 */
 	public static final long REFRESH_RATE = 1000L;
 	private static String footer = "";
 	private static String header = "";
 	private static boolean bungeecord = false;
-	private static Map<String, Function<Player, String>> textOptions = new HashMap<>();
+	/**
+	 * Normal option name regex pattern to check if a normal text option has a valid
+	 * name
+	 * 
+	 * @since 1.3
+	 */
+	public static final String NORMAL_OPTION_NAME_PATTERN = "[A-Za-z0-9\\_]*";
+	private static List<OptionMatcher> textOptions = new ArrayList<>();
 
 	private static File createDir(File dir) {
 		dir.mkdirs();
@@ -79,6 +95,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 
 	/**
 	 * @return if CustomTab asked by a Bungee proxy or not for local information
+	 * @since 1.2
 	 */
 	public static boolean isBungeecord() {
 		return bungeecord;
@@ -88,6 +105,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 	 * get the raw local text footer
 	 * 
 	 * @return raw footer
+	 * @since 1.2
 	 */
 	public static String getLocalFooter() {
 		return footer;
@@ -97,6 +115,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 	 * get the raw local text header
 	 * 
 	 * @return raw header
+	 * @since 1.2
 	 */
 	public static String getLocalHeader() {
 		return header;
@@ -129,11 +148,28 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 	 * @param player
 	 *            player to base information
 	 * @return the text with options
+	 * @since 1.1
+	 * @see #registerTextOption(Pattern, String, BiFunction, BiFunction, boolean) to
+	 *      register new options
 	 */
 	public static String getOptionnedText(String raw, Player player) {
-		for (String key : textOptions.keySet())
-			raw = raw.replaceAll("%" + key + "%", textOptions.get(key).apply(player));
-		return raw;
+		StringBuffer buffer = new StringBuffer(raw);
+		textOptions.forEach(option -> {
+			Matcher matcher = option.getPattern().matcher(buffer.toString());
+			buffer.setLength(0);
+			while (matcher.find()) {
+				String result;
+				try {
+					result = option.getFunction().apply(player, matcher);
+				} catch (Exception e) {
+					e.printStackTrace();
+					result = "*error*";
+				}
+				matcher.appendReplacement(buffer, result);
+			}
+			matcher.appendTail(buffer);
+		});
+		return buffer.toString().replace('&', ChatColor.COLOR_CHAR);
 	}
 
 	private static Class<?> getSClass(String type, String name) {
@@ -146,7 +182,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		}
 	}
 
-	Map<String, Function<Player, String>> getTextOptions() {
+	List<OptionMatcher> getTextOptions() {
 		return textOptions;
 	}
 
@@ -164,17 +200,71 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 	/**
 	 * Register a new text option for this plugin
 	 * 
+	 * @param optionMatcher
+	 *            option matcher to match and evaluate the text
+	 * @see #registerTextOption(OptionMatcher)
+	 * @since 1.3
+	 */
+	public static void registerTextOption(OptionMatcher optionMatcher) {
+		textOptions.removeIf(op -> op.getPattern().toString().equals(optionMatcher.getPattern().toString()));
+		textOptions.add(optionMatcher);
+	}
+
+	/**
+	 * Register a new text option for this plugin
+	 * 
+	 * @param pattern
+	 *            pattern to match the option
+	 * @param usage
+	 *            the usage of this pattern
+	 * @param option
+	 *            text option associated
+	 * @since 1.3
+	 * @see #registerTextOption(Pattern, String, BiFunction, BiFunction, boolean)
+	 */
+	public static void registerTextOption(Pattern pattern, String usage, BiFunction<Player, Matcher, String> option) {
+		registerTextOption(pattern, usage, option, null, false);
+	}
+
+	/**
+	 * Register a new text option for this plugin
+	 * 
+	 * @param pattern
+	 *            pattern to match the option
+	 * @param usage
+	 *            the usage of this pattern
+	 * @param option
+	 *            text option associated
+	 * @param exampleFunction
+	 *            the example to show in the tab command opt list
+	 * @param canBeTabbed
+	 *            if in the tab command the option usage can be get with tab
+	 * @since 1.3
+	 */
+
+	public static void registerTextOption(Pattern pattern, String usage, BiFunction<Player, Matcher, String> option,
+			BiFunction<Player, OptionMatcher, String> exampleFunction, boolean canBeTabbed) {
+		registerTextOption(new OptionMatcher(pattern, usage, option, exampleFunction, canBeTabbed));
+	}
+
+	/**
+	 * Register a new text option for this plugin
+	 * 
 	 * @param name
 	 *            name of the option to add
 	 * @param option
 	 *            text option associated with the specified name
 	 * @throws IllegalArgumentException
-	 *             if the name does contain a non-alphanumerics characters
+	 *             if the name does contain non-alphanumerics characters
+	 * @since 1.1
+	 * @see #registerTextOption(Pattern, String, BiFunction)
 	 */
 	public static void registerTextOption(String name, Function<Player, String> option) {
-		if (!name.matches("[A-Za-z0-9\\_]*"))
+		if (!name.matches(NORMAL_OPTION_NAME_PATTERN))
 			throw new IllegalArgumentException("name can only contain alphanumerics characters");
-		textOptions.put(name, option);
+		String usage = "%" + name + "%";
+		registerTextOption(Pattern.compile(usage), usage, (p, m) -> option.apply(p),
+				(p, om) -> om.getFunction().apply(p, null), true);
 	}
 
 	/**
@@ -186,6 +276,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 	 *            header text
 	 * @param footer
 	 *            footer text
+	 * @since 1.1
 	 */
 	public static void sendTab(Player player, String footer, String header) {
 		try {
@@ -216,6 +307,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 	 *             if the channel {@link CustomTabPlugin#CHANNEL_NAME} isn't
 	 *             registered for the plugin
 	 * @see {@link CustomTabPlugin#sendTab(Player, String, String)} to send a tab
+	 * @since 1.1
 	 */
 	public static void sendTabInformation(JavaPlugin plugin, Player player, String footer, String header) {
 		if (!plugin.getServer().getMessenger().isOutgoingChannelRegistered(plugin, CHANNEL_NAME))
@@ -240,6 +332,10 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		bw.write(value);
 		bw.close();
 		return file;
+	}
+
+	static long getSystemTimeInSecond() {
+		return System.currentTimeMillis() / 1000L;
 	}
 
 	void setFooter(String footer) {
@@ -288,21 +384,21 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-		textOptions.put("localdisplayname", p -> p.getDisplayName());
-		textOptions.put("localname", p -> p.getName());
-		textOptions.put("worldname", p -> p.getWorld().getName());
-		textOptions.put("localmotd", p -> Bukkit.getMotd());
-		textOptions.put("localversion", p -> Bukkit.getBukkitVersion());
-		textOptions.put("localservername", p -> Bukkit.getServerName());
-		textOptions.put("localmaxplayer", p -> String.valueOf(Bukkit.getMaxPlayers()));
-		textOptions.put("localplayerscounts", p -> String.valueOf(Bukkit.getOnlinePlayers().size()));
-		textOptions.put("x", p -> String.valueOf(p.getLocation().getBlockX()));
-		textOptions.put("y", p -> String.valueOf(p.getLocation().getBlockY()));
-		textOptions.put("z", p -> String.valueOf(p.getLocation().getBlockZ()));
-		textOptions.put("px", p -> String.valueOf(p.getLocation().getX()));
-		textOptions.put("py", p -> String.valueOf(p.getLocation().getY()));
-		textOptions.put("pz", p -> String.valueOf(p.getLocation().getZ()));
-		textOptions.put("lping", p -> {
+		registerTextOption("localdisplayname", p -> p.getDisplayName());
+		registerTextOption("localname", p -> p.getName());
+		registerTextOption("worldname", p -> p.getWorld().getName());
+		registerTextOption("localmotd", p -> Bukkit.getMotd());
+		registerTextOption("localversion", p -> Bukkit.getBukkitVersion());
+		registerTextOption("localservername", p -> Bukkit.getServerName());
+		registerTextOption("localmaxplayer", p -> String.valueOf(Bukkit.getMaxPlayers()));
+		registerTextOption("localplayerscounts", p -> String.valueOf(Bukkit.getOnlinePlayers().size()));
+		registerTextOption("x", p -> String.valueOf(p.getLocation().getBlockX()));
+		registerTextOption("y", p -> String.valueOf(p.getLocation().getBlockY()));
+		registerTextOption("z", p -> String.valueOf(p.getLocation().getBlockZ()));
+		registerTextOption("px", p -> String.valueOf(p.getLocation().getX()));
+		registerTextOption("py", p -> String.valueOf(p.getLocation().getY()));
+		registerTextOption("pz", p -> String.valueOf(p.getLocation().getZ()));
+		registerTextOption("lping", p -> {
 			int ping = 0;
 			try {
 				ping = (int) getField("ping",
@@ -311,7 +407,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 			}
 			return String.valueOf(ping);
 		});
-		textOptions.put("lcping", p -> {
+		registerTextOption("lcping", p -> {
 			int ping = 0;
 			try {
 				ping = (int) getField("ping",
@@ -325,7 +421,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 											: (ping < 1000 ? ChatColor.RED : ChatColor.DARK_RED))))).toString()
 					+ String.valueOf(ping);
 		});
-		textOptions.put("tps", p -> {
+		registerTextOption("tps", p -> {
 			try {
 				Object server = getNMSClass("MinecraftServer").getMethod("getServer").invoke(null);
 				double tps = ((double[]) server.getClass().getField("recentTps").get(server))[0];
@@ -334,7 +430,37 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 				return "";
 			}
 		});
-		textOptions.put("ldate", p -> new SimpleDateFormat("HH:mm:ss").format(Calendar.getInstance().getTime()));
+		registerTextOption(Pattern.compile("%ldate((-.+)?){1}%"), "%ldate%", (p, m) -> {
+			String format = m.group(1);
+			return new SimpleDateFormat(format.isEmpty() ? "HH:mm:ss" : format.substring(1))
+					.format(Calendar.getInstance().getTime());
+		}, (p, om) -> new SimpleDateFormat("HH:mm:ss").format(Calendar.getInstance().getTime()), true);
+		char[] ALL_COLORS = { 'a', 'b', 'c', 'd', 'e', 'f', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9' };
+		char[] LIGHT_COLOR = { 'a', 'b', 'c', 'd', 'e', 'f' };
+		char[] HEAVY_COLORS = { '2', '3', '4', '5', '6', '7' };
+		char[] FORMAT = { 'o', 'l', 'm', 'n', 'r', 'k' };
+
+		registerTextOption(Pattern.compile("%s(wap)?(((-[a-fA-F0-9k-oK-OrR]+)?)|l(ight)?|f(ormat)?|h(eavy)?)?%"),
+				"%swap%|%swap-<colors>%|%swapheavy%|%swaplight%|%swapformat%", (p, m) -> {
+					String format = m.group(2);
+					char[] chars = format.isEmpty() ? ALL_COLORS
+							: format.toLowerCase().matches("h(eavy)?") ? HEAVY_COLORS
+									: format.toLowerCase().matches("l(ight)?") ? LIGHT_COLOR
+											: format.toLowerCase().matches("f(ormat)?") ? FORMAT
+													: format.substring(1).toCharArray();
+					return new String(
+							new char[] { ChatColor.COLOR_CHAR, chars[(int) (getSystemTimeInSecond() % chars.length)] });
+				});
+
+		// I use add(0, ...) to allow options swapping
+		textOptions.add(0, new OptionMatcher(Pattern.compile("%s(wap)?t(ext)?(-[0-9]+)?-(.+)?%"),
+				"%swaptext(-delay)?-text1;;text2;;...%", (p, m) -> {
+					String d = m.group(3);
+					String[] formats = m.group(4).split(";;");
+					return formats[(int) ((getSystemTimeInSecond()
+							/ Math.max(1, d.isEmpty() ? 1L : Long.valueOf(d.substring(1)).longValue()))
+							% formats.length)];
+				}, null, false));
 		if (bungeecord) {
 			getServer().getMessenger().registerOutgoingPluginChannel(this, CHANNEL_NAME);
 			getServer().getMessenger().registerIncomingPluginChannel(this, CHANNEL_NAME, this);
@@ -380,6 +506,7 @@ public class CustomTabPlugin extends JavaPlugin implements PluginMessageListener
 		getConfig().set("bungeecord", bungeecord);
 		saveConfig();
 	}
+
 	static void sendText(CommandSender sender, BaseComponent... components) {
 		if (sender instanceof Player) {
 			try {
